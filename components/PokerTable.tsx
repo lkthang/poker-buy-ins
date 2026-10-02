@@ -7,6 +7,8 @@ import {
   activeMoneyCents,
   allCashedOut,
   appendLedger,
+  canRemovePlayer,
+  canStandBackUp,
   createId,
   formatCents,
   formatLedgerTime,
@@ -20,6 +22,7 @@ import {
   parseCashOut,
   playerBuyInCents,
   potCents,
+  standingBuyIns,
   settle,
   subscribePlayers,
   updatePlayers,
@@ -27,14 +30,23 @@ import {
 
 function PlayerLedger({ entries }: { entries: LedgerEntry[] }) {
   return (
-    <div className="mt-4 border-t border-ink/10 pt-3">
-      <h3 className="text-xs font-medium tracking-[0.16em] text-ink/45 uppercase">
-        Ledger
-      </h3>
+    <details className="group mt-4 border-t border-ink/10 pt-1">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+        <span className="text-xs font-medium tracking-[0.16em] text-ink/45 uppercase">
+          Ledger
+          {entries.length > 0 ? ` · ${entries.length}` : ""}
+        </span>
+        <span
+          aria-hidden="true"
+          className="text-ink/40 transition-transform group-open:rotate-180"
+        >
+          ▾
+        </span>
+      </summary>
       {entries.length === 0 ? (
-        <p className="mt-2 text-sm text-ink/45">No activity yet.</p>
+        <p className="mt-1 pb-1 text-sm text-ink/45">No activity yet.</p>
       ) : (
-        <ol className="mt-2 flex max-h-48 flex-col gap-1.5 overflow-y-auto">
+        <ol className="mt-1 flex max-h-48 flex-col gap-1.5 overflow-y-auto pb-1">
           {entries.map((entry, index) => {
             const time = formatLedgerTime(entry.at);
             return (
@@ -56,7 +68,7 @@ function PlayerLedger({ entries }: { entries: LedgerEntry[] }) {
           })}
         </ol>
       )}
-    </div>
+    </details>
   );
 }
 
@@ -105,8 +117,30 @@ export default function PokerTable() {
 
   function removePlayer(playerId: string) {
     const player = players.find((item) => item.id === playerId);
-    if (!player || player.buyIns.length > 0) return;
+    if (!player || !canRemovePlayer(player)) return;
     updatePlayers((current) => current.filter((item) => item.id !== playerId));
+  }
+
+  function standBackUp(playerId: string) {
+    updatePlayers((current) =>
+      current.map((item) => {
+        if (item.id !== playerId || !canStandBackUp(item)) return item;
+        const ledger = item.ledger.slice(0, -1);
+        const stood = ledger[ledger.length - 1];
+        return {
+          ...item,
+          ledger,
+          seated: false,
+          cashOut: stood?.kind === "stood" ? (stood.amount ?? null) : null,
+          buyIns: standingBuyIns(ledger),
+        };
+      }),
+    );
+    setCashOutDrafts((current) => {
+      const next = { ...current };
+      delete next[playerId];
+      return next;
+    });
   }
 
   function leaveTable(playerId: string) {
@@ -235,7 +269,7 @@ export default function PokerTable() {
   const departed = players.filter((player) => player.seated === false);
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col px-4 py-6 sm:py-10">
+    <main className="mx-auto flex min-h-dvh w-full flex-col px-4 py-6 sm:py-10">
       <header className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-medium tracking-[0.22em] text-gold uppercase">
@@ -280,7 +314,7 @@ export default function PokerTable() {
         </button>
       </header>
 
-      <form onSubmit={addPlayer} className="mt-8">
+      <form onSubmit={addPlayer} className="mt-8 max-w-lg">
         <label htmlFor="player-name" className="text-sm text-paper/80">
           Add a player
         </label>
@@ -324,7 +358,7 @@ export default function PokerTable() {
       ) : null}
 
       {seated.length > 0 ? (
-      <div className="mt-6 flex flex-col gap-4">
+      <div className="mt-6 grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),20rem))]">
         {seated.map((player) => {
           const boughtIn = playerBuyInCents(player);
           const net = netCents(player);
@@ -353,15 +387,7 @@ export default function PokerTable() {
                       : ""}
                   </p>
                 </div>
-                {player.buyIns.length === 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => removePlayer(player.id)}
-                    className="rounded-full px-3 py-2 text-sm text-ink/55 transition hover:bg-ink/5 hover:text-down"
-                  >
-                    Remove
-                  </button>
-                ) : (
+                {player.buyIns.length > 0 ? (
                   <button
                     type="button"
                     onClick={() => leaveTable(player.id)}
@@ -369,7 +395,23 @@ export default function PokerTable() {
                   >
                     Leave
                   </button>
-                )}
+                ) : canStandBackUp(player) ? (
+                  <button
+                    type="button"
+                    onClick={() => standBackUp(player.id)}
+                    className="rounded-full bg-ink px-3 py-2 text-sm font-medium text-paper transition hover:bg-ink/85"
+                  >
+                    Stand back up
+                  </button>
+                ) : canRemovePlayer(player) ? (
+                  <button
+                    type="button"
+                    onClick={() => removePlayer(player.id)}
+                    className="rounded-full px-3 py-2 text-sm text-ink/55 transition hover:bg-ink/5 hover:text-down"
+                  >
+                    Remove
+                  </button>
+                ) : null}
               </div>
 
               {player.buyIns.length > 0 ? (
@@ -394,7 +436,7 @@ export default function PokerTable() {
                 <p className="mt-4 text-sm text-ink/50">No buy-ins yet.</p>
               )}
 
-              <div className="mt-4 grid grid-cols-4 gap-2">
+              <div className="mt-4 grid grid-cols-3 gap-2">
                 {QUICK_BUY_INS.map((amount) => (
                   <button
                     key={amount}
@@ -483,7 +525,7 @@ export default function PokerTable() {
       {departed.length > 0 ? (
         <section className="mt-6">
           <h2 className="font-serif text-2xl text-paper">Cashed out</h2>
-          <div className="mt-3 flex flex-col gap-3">
+          <div className="mt-3 grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),20rem))]">
             {departed.map((player) => {
               const boughtIn = playerBuyInCents(player);
               const net = ledgerNetCents(player);

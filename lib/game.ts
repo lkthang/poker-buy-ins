@@ -1,6 +1,6 @@
 export const STORAGE_KEY = "poker-buyins";
 
-export const QUICK_BUY_INS = [20, 40, 50, 100] as const;
+export const QUICK_BUY_INS = [20, 50, 100] as const;
 
 export type BuyIn = {
   id: string;
@@ -217,6 +217,49 @@ export function ledgerCashOutCents(player: Player): number {
 
 export function ledgerNetCents(player: Player): number {
   return ledgerCashOutCents(player) - ledgerBuyInCents(player);
+}
+
+export function canRemovePlayer(player: Player): boolean {
+  return ledgerBuyInCents(player) === 0 && ledgerCashOutCents(player) === 0;
+}
+
+export function canStandBackUp(player: Player): boolean {
+  if (player.seated === false || player.buyIns.length > 0) return false;
+  const ledger = player.ledger ?? [];
+  const last = ledger[ledger.length - 1];
+  const previous = ledger[ledger.length - 2];
+  return last?.kind === "sat" && previous?.kind === "stood";
+}
+
+export function standingBuyIns(ledger: LedgerEntry[]): BuyIn[] {
+  let stoodIndex = -1;
+  for (let index = ledger.length - 1; index >= 0; index -= 1) {
+    if (ledger[index].kind === "stood") {
+      stoodIndex = index;
+      break;
+    }
+  }
+  if (stoodIndex < 0) return [];
+
+  let satIndex = 0;
+  for (let index = stoodIndex - 1; index >= 0; index -= 1) {
+    if (ledger[index].kind === "sat") {
+      satIndex = index;
+      break;
+    }
+  }
+
+  const buyIns: BuyIn[] = [];
+  for (const entry of ledger.slice(satIndex + 1, stoodIndex)) {
+    if (entry.kind === "buy-in" && entry.amount !== undefined) {
+      buyIns.push({ id: entry.id, amount: entry.amount });
+    }
+    if (entry.kind === "removed-buy-in" && entry.amount !== undefined) {
+      const match = buyIns.findIndex((buyIn) => buyIn.amount === entry.amount);
+      if (match >= 0) buyIns.splice(match, 1);
+    }
+  }
+  return buyIns;
 }
 
 export function potCents(players: Player[]): number {
